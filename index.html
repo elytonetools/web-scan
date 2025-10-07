@@ -33,7 +33,7 @@
     .panel { background:#fff; border-radius:12px; padding:14px; box-shadow:0 2px 8px rgba(0,0,0,.05); }
     .tips { background:var(--warn); padding:10px; border-radius:10px; font-size:13px; }
     .error { background:var(--error); padding:10px; border-radius:10px; }
-    .manual-box input{ padding:8px; border-radius:8px; border:1px solid #ccc; }
+    .manual-box input{ padding:8px; border-radius:8px; border:1px solid #ccc; min-width:220px; flex:1; }
   .manual-box button{ padding:8px 14px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
   .manual-box button:hover{ background:#f0f0f0; }
 </style>
@@ -220,7 +220,21 @@
   }
 
   // ===== Scanner =====
-  async function initCameras() {
+  async function initCameras(){
+    Html5Qrcode.getCameras().then(devices => {
+      const sel = document.getElementById('cameraSelect');
+      sel.innerHTML = '';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id; opt.textContent = d.label || `相機 ${d.id}`;
+        sel.appendChild(opt);
+      });
+      const back = devices.find(d => /back|rear/i.test(d.label));
+      currentCameraId = back?.id || devices[0]?.id || null;
+      if (currentCameraId) sel.value = currentCameraId;
+      sel.onchange = () => { currentCameraId = sel.value; restartScanner(); };
+    }).catch(e => { console.warn('讀取攝影機清單失敗：', e); });
+  } {
     try {
       const devices = await Html5Qrcode.getCameras();
       const sel = $('#cameraSelect');
@@ -234,7 +248,7 @@
       const back = devices.find(d => /back|rear/i.test(d.label));
       currentCameraId = back?.id || devices[0]?.id || null;
       if (currentCameraId) sel.value = currentCameraId;
-      sel.onchange = () => { currentCameraId = sel.value; restartScanner(); setTimeout(hideFileScanUIs,0); };
+      sel.onchange = () => { currentCameraId = sel.value; restartScanner();  };
     } catch (e) {
       console.warn('讀取攝影機清單失敗：', e);
     }
@@ -245,8 +259,7 @@
       fps: 12,
       qrbox: { width: 260, height: 260 },
       rememberLastUsedCamera: true,
-      aspectRatio: 1.0,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+      aspectRatio: 1.0
     }, false);
     scanner.render(onScanSuccess);
   }
@@ -256,8 +269,7 @@
       fps: 12,
       qrbox: { width: 260, height: 260 },
       rememberLastUsedCamera: true,
-      aspectRatio: 1.0,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+      aspectRatio: 1.0
     }, false);
     scannerQuery.render(onQueryScan);
   }
@@ -276,6 +288,17 @@
     }
   });
 
+  // 自訂：隱藏檔案/圖片上傳 UI（Html5QrcodeScanner 內建的檔案掃描）
+  function hideFileScanUIs() {
+    try {
+      document.querySelectorAll('#reader input[type=file], #readerQuery input[type=file]').forEach(el=> el.style.display='none');
+      document.querySelectorAll('#reader button, #readerQuery button').forEach(btn => {
+        const t = (btn.innerText||'').trim();
+        if (/file|image|檔案|圖片/i.test(t)) btn.style.display = 'none';
+      });
+    } catch {}
+  }
+
   $1  function submitManual(mode){
     if(mode==='scan'){
       const v = (document.getElementById('manualInput')?.value||'').trim();
@@ -286,17 +309,6 @@
     }
   }
 
-  async function onScanSuccessScanUIs() {
-    try {
-      document.querySelectorAll('#reader input[type=file], #readerQuery input[type=file]').forEach(el=> el.style.display='none');
-      document.querySelectorAll('#reader button, #readerQuery button').forEach(btn => {
-        const t = (btn.innerText||'').trim();
-        if (/file|image|檔案|圖片/i.test(t)) btn.style.display = 'none';
-      });
-    } catch {}
-  }
-
-  // ===== Upload / Query Flows =====
   async function onScanSuccess(decodedText) {
     if (debounceSameCode(decodedText)) return;
     $('#result').innerText = `📦 掃描成功：${decodedText}`;
@@ -424,7 +436,7 @@
       $('#scanSection').style.display = 'none';
       $('#querySection').style.display = 'block';
       $('#tableSection').style.display = 'none';
-      restartQueryScanner(); setTimeout(hideFileScanUIs,0);
+      restartQueryScanner(); 
       try { scanner?.clear(); } catch {}
     }
   }
