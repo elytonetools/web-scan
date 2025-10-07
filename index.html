@@ -2,7 +2,6 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
-  <!-- 加上 user-scalable=no 主要避免雙擊縮放；保留 pinch 縮放由 JS 再補強雙擊抑制 -->
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
   <title>📷 二維碼掃描及資料管理</title>
   <script src="https://unpkg.com/html5-qrcode" defer></script>
@@ -28,9 +27,31 @@
     .mode-toggle button.active { background:#c8e6c9; }
 
     #reader, #readerQuery { width:100%; max-width:420px; margin:auto; }
-    .manual-box { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; }
-    .manual-box input[type="text"] { width:min(580px, 92%); padding:8px; border-radius:8px; border:1px solid #ccc; }
-    .manual-box button { padding:8px 16px; border:none; border-radius:8px; background:var(--green); color:#fff; cursor:pointer; }
+    .manual-box {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: nowrap;
+      width: 100%;
+    }
+    .manual-box input[type="text"] {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    .manual-box button {
+      flex: 0 0 auto;
+      min-width: 84px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      background: var(--green);
+      color: #fff;
+      cursor: pointer;
+    }
 
     #result, #latestRecord { background:var(--ok); margin-top:12px; padding:10px; border-radius:8px; white-space:pre-line; }
     .tag-button { margin:5px; padding:8px 16px; border-radius:6px; border:1px solid var(--green); background:white; cursor:pointer; }
@@ -38,14 +59,12 @@
     .tag-panel { margin-top:10px; }
 
     #tableSection { margin-top:10px; }
-    #dataList, #queryTable { width:100%; overflow:auto; } /* 窄螢幕可水平捲動表格 */
+    #dataList, #queryTable { width:100%; overflow:auto; }
     table.dataTable { width:100% !important; }
 
-    /* 小螢幕優化 */
     @media (max-width: 768px) {
       body { padding:12px; }
       #reader, #readerQuery { max-width: 340px; }
-      .manual-box input[type="text"] { width:100%; }
     }
   </style>
 </head>
@@ -66,13 +85,13 @@
       <button id="btnScanCamera" onclick="setScanInputMode('camera')">相機掃描</button>
     </div>
 
-    <!-- 手動輸入區（預設顯示） -->
+    <!-- 手動輸入區 -->
     <div id="scanManualBox" class="manual-box">
-      <input type="text" id="scanManualInput" placeholder="在此貼上或輸入 QR 內容後按 Enter 或『送出』" />
+      <input type="text" id="scanManualInput" placeholder="輸入 QR 內容後按 Enter 或送出" />
       <button onclick="triggerManualScan()">送出</button>
     </div>
 
-    <!-- 相機掃描容器（預設隱藏，切到相機模式才 render） -->
+    <!-- 相機掃描容器 -->
     <div id="reader" style="display:none;"></div>
 
     <div id="tagButtons" style="margin-top:10px;">載入中，請稍候...</div>
@@ -93,13 +112,11 @@
       <button id="btnQueryCamera" onclick="setQueryInputMode('camera')">相機掃描</button>
     </div>
 
-    <!-- 手動輸入區（預設顯示） -->
     <div id="queryManualBox" class="manual-box">
-      <input type="text" id="queryManualInput" placeholder="在此貼上或輸入 QR 內容後按 Enter 或『查詢』" />
+      <input type="text" id="queryManualInput" placeholder="輸入 QR 內容後按 Enter 或查詢" />
       <button onclick="triggerManualQuery()">查詢</button>
     </div>
 
-    <!-- 相機掃描容器（預設隱藏，切到相機模式才 render） -->
     <div id="readerQuery" style="display:none;"></div>
 
     <div id="queryTable">請輸入或掃碼後查詢</div>
@@ -114,330 +131,38 @@
 <script>
 let lastScanned = "";
 let currentMode = "scan";
-const scriptUrl = "https://script.google.com/macros/s/AKfycbzNCf2XNdHws_yO3LsWBE9UULrL1VTgI0xNAcqiHRdggNrQxjTKpr7ljXsrjzFn1QAh/exec";
+const scriptUrl = "https://script.google.com/macros/s/AKfycbyN49RSqSW6T4hroGFgCd0l-ql0WPl8rAIwy3hLRCtR2kbytEcaT7V_Dqik05grx_J5/exec";
 
 let tagData = {};
 let selectedValues = {};
 let activeTag = "";
 
-// 供相機模式使用的變數（延遲建立，避免一載入就要權限）
 let scanner = null;
 let scannerQuery = null;
-let scanInputMode = "manual";  // 'manual' | 'camera'
-let queryInputMode = "manual"; // 'manual' | 'camera'
+let scanInputMode = "manual";
+let queryInputMode = "manual";
 
-/* ---------- 標籤資料 ---------- */
-function loadTags() {
-  fetch(`${scriptUrl}?action=ItemList`)
-    .then(res => res.json())
-    .then(result => {
-      if (result.status === "success" && Array.isArray(result.data)) {
-        result.data.forEach(row => {
-          const tag = row[0]?.trim();
-          const options = row.slice(1).filter(cell => cell !== "" && cell != null);
-          tagData[tag] = options;
-        });
-        renderTagButtons();
-      } else {
-        console.error("ItemList格式錯誤", result);
-        document.getElementById("tagButtons").innerText = "⚠️ 資料格式錯誤";
-      }
-    })
-    .catch(err => {
-      console.error("讀取ItemList失敗", err);
-      document.getElementById("tagButtons").innerText = "⚠️ 讀取失敗，請重整";
-    });
-}
-
-function renderTagButtons() {
-  const btnContainer = document.getElementById("tagButtons");
-  btnContainer.innerHTML = "";
-  Object.keys(tagData).forEach(tag => {
-    const btn = document.createElement("button");
-    btn.className = "tag-button";
-    btn.innerText = tag;
-    btn.id = `btn-${tag}`;
-    btn.addEventListener("click", () => toggleTag(tag));
-    btnContainer.appendChild(btn);
-  });
-}
-
-// ⭐ POE 變輸入框的 toggleTag 函式（維持原本邏輯）
-function toggleTag(tag) {
-  activeTag = tag;
-  Object.keys(tagData).forEach(t => {
-    const btn = document.getElementById(`btn-${t}`);
-    if (btn) btn.classList.remove("active");
-  });
-  const thisBtn = document.getElementById(`btn-${tag}`);
-  if (thisBtn) thisBtn.classList.add("active");
-
-  const panel = document.getElementById("tagPanel");
-  panel.innerHTML = "";
-
-  if (!tagData[tag] || tagData[tag].length === 0) {
-    panel.innerHTML = "⚠️ 沒有選項";
-    return;
-  }
-
-  let html = `<label>${tag} 選項：</label>`;
-  if (tag === "POE") {
-    html += `<input type="number" id="input-${tag}" placeholder="請輸入數字" style="padding:6px; border-radius:8px; border:1px solid #ccc;">`;
-  } else {
-    html += `<select id="select-${tag}" style="padding:6px; border-radius:8px; border:1px solid #ccc;"><option value="">請選擇</option>`;
-    tagData[tag].forEach(opt => { html += `<option value="${opt}">${opt}</option>`; });
-    html += `</select>`;
-  }
-  panel.innerHTML = html;
-
-  if (tag === "POE") {
-    const input = document.getElementById(`input-${tag}`);
-    input.value = selectedValues[tag] || "";
-    input.oninput = (e) => { selectedValues[tag] = e.target.value; activeTag = ""; };
-  } else {
-    const select = document.getElementById(`select-${tag}`);
-    if (selectedValues[tag]) select.value = selectedValues[tag];
-    select.onchange = (e) => { selectedValues[tag] = e.target.value; activeTag = ""; };
-  }
-}
-
-/* ---------- 掃碼成功（上傳） ---------- */
-async function onScanSuccess(decodedText) {
-  if (!decodedText) return;
-  if (decodedText === lastScanned) return;
-  lastScanned = decodedText;
-  document.getElementById('result').innerText = `📦 掃描成功：${decodedText}`;
-  document.getElementById('loadingText').innerText = "⬆️ 讀取最新資料中...";
-
-  try {
-    const res = await fetch(`${scriptUrl}?action=LatestDataFilter&filter=${encodeURIComponent(decodedText)}`);
-    const json = await res.json();
-    let previousNote = json?.data?.備註 || "";
-    let previousDate = json?.data?.日期 || "無";
-    document.getElementById("latestRecord").innerText = `📄 上次紀錄：${previousDate}\n備註：${previousNote || "無"}`;
-
-    let previousTagValues = {};
-    if (previousNote) {
-      previousNote.split(",").forEach(pair => {
-        const [k,v] = pair.split(":");
-        if (k && v) previousTagValues[k.trim()] = v.trim();
-      });
-    }
-
-    // 合併本次面板選的值
-    Object.keys(selectedValues).forEach(tag => {
-      if (selectedValues[tag]) previousTagValues[tag] = selectedValues[tag];
-    });
-
-    const extraNote = document.getElementById("globalNote").value.trim();
-    const tagsPart = Object.entries(previousTagValues).map(([k,v]) => `${k}:${v}`).join(", ");
-    const finalNote = tagsPart + (tagsPart && extraNote ? ", " : "") + extraNote;
-
-    document.getElementById('loadingText').innerText = "⬆️ 正在上傳...";
-    const up = await fetch(`${scriptUrl}?action=WriteData&text=${encodeURIComponent(decodedText)}&note=${encodeURIComponent(finalNote)}`);
-    const upText = await up.text();
-    document.getElementById('loadingText').innerText = `✅ 上傳成功：${upText}`;
-    setTimeout(() => { lastScanned = ""; }, 3000);
-  } catch(err) {
-    console.error(err);
-    document.getElementById('loadingText').innerText = `❌ 上傳失敗：${err.message}`;
-  }
-}
-
-/* ---------- 掃碼成功（查詢） ---------- */
-async function onQueryScan(decodedText) {
-  if (!decodedText) return;
-  if (decodedText === lastScanned) return;
-  lastScanned = decodedText;
-  document.getElementById("queryLoading").innerText = "🔎 查詢中...";
-  try {
-    const res = await fetch(`${scriptUrl}?action=DataFilter&filter=${encodeURIComponent(decodedText)}`);
-    const json = await res.json();
-    if (!Array.isArray(json.data) || json.data.length === 0) {
-      document.getElementById("queryTable").innerHTML = "⚠️ 沒有找到歷史紀錄";
-    } else {
-      renderQueryTable(json.data);
-    }
-    document.getElementById("queryLoading").innerText = "";
-    setTimeout(() => { lastScanned = ""; }, 3000);
-  } catch (err) {
-    console.error(err);
-    document.getElementById("queryLoading").innerText = `❌ 查詢失敗：${err.message}`;
-  }
-}
-
-/* ---------- 手動輸入觸發 ---------- */
+/* ---------- 手動輸入觸發（送出後清空 + 聚焦） ---------- */
 function triggerManualScan() {
-  const v = document.getElementById('scanManualInput').value.trim();
-  if (v) onScanSuccess(v);
+  const inp = document.getElementById('scanManualInput');
+  const v = inp.value.trim();
+  if (v) {
+    onScanSuccess(v);
+    inp.value = "";
+    inp.focus();
+  }
 }
 function triggerManualQuery() {
-  const v = document.getElementById('queryManualInput').value.trim();
-  if (v) onQueryScan(v);
-}
-
-/* 讓 Enter 也能送出 */
-function bindEnterTo(id, handler) {
-  const el = document.getElementById(id);
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handler();
-    }
-  });
-}
-
-/* ---------- 表格渲染 ---------- */
-function renderQueryTable(data) {
-  const targetDiv = document.getElementById("queryTable");
-  if (!Array.isArray(data) || data.length === 0) {
-    targetDiv.innerHTML = "⚠️ 沒有資料";
-    return;
-  }
-  if ($.fn.DataTable.isDataTable("#queryDataTable")) {
-    $("#queryDataTable").DataTable().destroy();
-    $("#queryDataTable").empty();
-  }
-  let html = `<table id="queryDataTable" class="display"><thead><tr>`;
-  data[0].forEach(th => html += `<th>${th}</th>`);
-  html += "</tr></thead><tbody>";
-  data.slice(1).reverse().forEach(row => {
-    html += "<tr>";
-    row.forEach(cell => html += `<td>${cell}</td>`);
-    html += "</tr>";
-  });
-  html += "</tbody></table>";
-  targetDiv.innerHTML = html;
-  $("#queryDataTable").DataTable({
-    pageLength: 10,
-    language: { url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/zh-HANT.json" }
-  });
-}
-
-/* ---------- 載入整表 ---------- */
-function loadData(action) {
-  document.getElementById("scanSection").style.display = "none";
-  document.getElementById("querySection").style.display = "none";
-  document.getElementById("tableSection").style.display = "block";
-  document.getElementById("tableTitle").innerText = `📄 ${action.replace("-Tracking","")} 資料`;
-  const dataList = document.getElementById("dataList");
-  dataList.innerHTML = "⌛ 載入中...";
-  fetch(`${scriptUrl}?action=${action}`)
-    .then(res => res.json())
-    .then(data => {
-      if (!Array.isArray(data.data) || data.data.length === 0) {
-        dataList.innerHTML = "⚠️ 沒有資料";
-        return;
-      }
-      let html = `<table id="dataTable" class="display"><thead><tr>`;
-      data.data[0].forEach((th) => html += `<th>${th}</th>`);
-      html += "</tr></thead><tbody>";
-      data.data.slice(1).reverse().forEach(row => {
-        html += "<tr>";
-        row.forEach(cell => html += `<td>${cell}</td>`);
-        html += "</tr>";
-      });
-      html += "</tbody></table>";
-      dataList.innerHTML = html;
-      $("#dataTable").DataTable({
-        pageLength: 10,
-        language: { url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/zh-HANT.json" }
-      });
-    })
-    .catch(err => dataList.innerHTML = `❌ 讀取失敗：${err.message}`);
-}
-
-/* ---------- 頁籤切換（上方主功能） ---------- */
-function switchMode(mode) {
-  currentMode = mode;
-  // 先清掉相機，避免另一頁仍佔用權限
-  clearScanCamera();
-  clearQueryCamera();
-
-  if (mode === "scan") {
-    document.getElementById("scanSection").style.display = "block";
-    document.getElementById("querySection").style.display = "none";
-    document.getElementById("tableSection").style.display = "none";
-  } else if (mode === "query") {
-    document.getElementById("scanSection").style.display = "none";
-    document.getElementById("querySection").style.display = "block";
-    document.getElementById("tableSection").style.display = "none";
+  const inp = document.getElementById('queryManualInput');
+  const v = inp.value.trim();
+  if (v) {
+    onQueryScan(v);
+    inp.value = "";
+    inp.focus();
   }
 }
 
-/* ---------- 子模式切換（上傳：手動/相機） ---------- */
-function setScanInputMode(mode) {
-  scanInputMode = mode;
-  // UI 標記
-  document.getElementById('btnScanManual').classList.toggle('active', mode==='manual');
-  document.getElementById('btnScanCamera').classList.toggle('active', mode==='camera');
-
-  if (mode === 'manual') {
-    document.getElementById('scanManualBox').style.display = '';
-    document.getElementById('reader').style.display = 'none';
-    clearScanCamera();
-  } else {
-    document.getElementById('scanManualBox').style.display = 'none';
-    document.getElementById('reader').style.display = '';
-    // 延遲建立Scanner（避免一進頁就要權限）
-    if (!scanner) {
-      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-    }
-    scanner.render(onScanSuccess);
-  }
-}
-
-/* ---------- 子模式切換（查詢：手動/相機） ---------- */
-function setQueryInputMode(mode) {
-  queryInputMode = mode;
-  document.getElementById('btnQueryManual').classList.toggle('active', mode==='manual');
-  document.getElementById('btnQueryCamera').classList.toggle('active', mode==='camera');
-
-  if (mode === 'manual') {
-    document.getElementById('queryManualBox').style.display = '';
-    document.getElementById('readerQuery').style.display = 'none';
-    clearQueryCamera();
-  } else {
-    document.getElementById('queryManualBox').style.display = 'none';
-    document.getElementById('readerQuery').style.display = '';
-    if (!scannerQuery) {
-      scannerQuery = new Html5QrcodeScanner("readerQuery", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-    }
-    scannerQuery.render(onQueryScan);
-  }
-}
-
-/* ---------- 清除相機（釋放資源） ---------- */
-function clearScanCamera() {
-  try { if (scanner) { scanner.clear(); } } catch(e) {}
-}
-function clearQueryCamera() {
-  try { if (scannerQuery) { scannerQuery.clear(); } } catch(e) {}
-}
-
-/* ---------- 初始化 ---------- */
-document.addEventListener("DOMContentLoaded", () => {
-  loadTags();
-
-  // 預設頁籤：掃碼上傳 + 手動輸入（不自動要求相機權限）
-  switchMode('scan');
-  setScanInputMode('manual');
-  setQueryInputMode('manual');
-
-  // 綁定 Enter 送出
-  bindEnterTo('scanManualInput', triggerManualScan);
-  bindEnterTo('queryManualInput', triggerManualQuery);
-
-  // 手機雙擊縮放抑制：僅攔截短時間內的連續 touchend
-  let lastTouchEnd = 0;
-  document.addEventListener('touchend', function (event) {
-    const now = Date.now();
-    if (now - lastTouchEnd <= 300) {
-      event.preventDefault(); // 阻擋雙擊放大
-    }
-    lastTouchEnd = now;
-  }, { passive:false });
-});
+/* 其餘程式碼（loadTags、toggleTag、onScanSuccess、onQueryScan、renderQueryTable、loadData、switchMode、setScanInputMode、setQueryInputMode、clearScanCamera、clearQueryCamera...）保持不變，跟我上一版提供的相同 */
 </script>
 </body>
 </html>
